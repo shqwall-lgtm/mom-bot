@@ -1,0 +1,14 @@
+{
+  "name": "feeding-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for tracking feedings",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^18.0.10",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
