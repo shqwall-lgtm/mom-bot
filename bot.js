@@ -31,6 +31,7 @@ let todayStr = new Date().toDateString();
 let feedings = []; // { start: Date, end: Date, ml: number }
 let currentStart = null; // Date или null
 let waitingMl = false; // ждём, что пользователь пришлёт число мл
+let lastBotMessageId = null;
 
 function ensureToday() {
   const nowStr = new Date().toDateString();
@@ -48,33 +49,53 @@ function formatTime(d) {
   return `${hh}:${mm}`;
 }
 
-bot.onText(/\/start/, (msg) => {
+async function sendOnlyLast(chatId, text, extra = {}) {
+  try {
+    if (lastBotMessageId) {
+      await bot.deleteMessage(chatId, lastBotMessageId).catch(() => {});
+    }
+  } catch (e) {}
+  const sent = await bot.sendMessage(chatId, text, { ...mainKeyboard, ...extra });
+  lastBotMessageId = sent.message_id;
+}
+
+async function tryDeleteUserMessage(msg) {
+  try {
+    if (msg && msg.message_id && msg.chat && msg.chat.id) {
+      await bot.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
+    }
+  } catch (e) {}
+}
+
+bot.onText(/\/start/, async (msg) => {
   ensureToday();
   const chatId = msg.chat.id;
-  bot.sendMessage(
+  await tryDeleteUserMessage(msg);
+  await sendOnlyLast(
     chatId,
     'Привет! Я помогу записывать кормления.\n\n' +
       'Кнопки внизу:\n' +
       '▶️ Начать кормление — когда начали\n' +
       '⏹ Закончить кормление — потом напиши, сколько мл съела дочка\n' +
-      '📊 Сегодня — сколько кормлений и всего мл за сегодня',
-    mainKeyboard
+      '📊 Сегодня — сколько кормлений и всего мл за сегодня'
   );
 });
 
-bot.on('message', (msg) => {
+bot.on('message', async (msg) => {
   ensureToday();
   const chatId = msg.chat.id;
   const text = (msg.text || '').trim();
 
   // Игнорируем служебные обновления без текста в обычном смысле
   if (!text) return;
+  if (text.startsWith('/start')) return; // уже обработано в onText
 
   // Если ждём число мл после "Закончить"
   if (waitingMl) {
+    await tryDeleteUserMessage(msg);
     const ml = Number(text.replace(',', '.'));
     if (!Number.isFinite(ml) || ml <= 0) {
-      bot.sendMessage(chatId, 'Напиши, пожалуйста, сколько мл съела дочка (только число), например: 120', mainKeyboard);
+      await sendOnlyLast(chatId, 'Напиши, пожалуйста, сколько мл съела дочка (только число), например: 120');
       return;
     }
     const endTime = new Date();
@@ -84,47 +105,47 @@ bot.on('message', (msg) => {
     waitingMl = false;
 
     const totalMl = feedings.reduce((sum, f) => sum + f.ml, 0);
-    bot.sendMessage(
+    await sendOnlyLast(
       chatId,
       `Записано: ${ml} мл (кормление с ${formatTime(startTime)} до ${formatTime(endTime)}).\n` +
-        `Сегодня: ${feedings.length} кормлений, всего ${totalMl} мл.`,
-      mainKeyboard
+        `Сегодня: ${feedings.length} кормлений, всего ${totalMl} мл.`
     );
     return;
   }
 
+  await tryDeleteUserMessage(msg);
+
   if (text === '▶️ Начать кормление') {
     if (currentStart) {
-      bot.sendMessage(
+      await sendOnlyLast(
         chatId,
-        `У тебя уже есть незакончённое кормление (началось в ${formatTime(currentStart)}). Сначала нажми ⏹ Закончить кормление и укажи, сколько мл.`,
-        mainKeyboard
+        `У тебя уже есть незакончённое кормление (началось в ${formatTime(currentStart)}). Сначала нажми ⏹ Закончить кормление и укажи, сколько мл.`
       );
       return;
     }
     currentStart = new Date();
-    bot.sendMessage(chatId, `Кормление началось в ${formatTime(currentStart)}. Когда закончите — нажми ⏹ Закончить кормление.`, mainKeyboard);
+    await sendOnlyLast(chatId, `Кормление началось в ${formatTime(currentStart)}. Когда закончите — нажми ⏹ Закончить кормление.`);
     return;
   }
 
   if (text === '⏹ Закончить кормление') {
     if (!currentStart) {
-      bot.sendMessage(chatId, 'Сейчас нет начатого кормления. Сначала нажми ▶️ Начать кормление.', mainKeyboard);
+      await sendOnlyLast(chatId, 'Сейчас нет начатого кормления. Сначала нажми ▶️ Начать кормление.');
       return;
     }
     waitingMl = true;
-    bot.sendMessage(chatId, 'Сколько мл съела дочка? Напиши число (например, 120).', mainKeyboard);
+    await sendOnlyLast(chatId, 'Сколько мл съела дочка? Напиши число (например, 120).');
     return;
   }
 
   if (text === '📊 Сегодня') {
     const totalMl = feedings.reduce((sum, f) => sum + f.ml, 0);
-    bot.sendMessage(chatId, `Сегодня: ${feedings.length} кормлений, всего ${totalMl} мл.`, mainKeyboard);
+    await sendOnlyLast(chatId, `Сегодня: ${feedings.length} кормлений, всего ${totalMl} мл.`);
     return;
   }
 
   // Любое другое сообщение
-  bot.sendMessage(chatId, 'Нажми кнопку внизу: ▶️ Начать, ⏹ Закончить или 📊 Сегодня.', mainKeyboard);
+  await sendOnlyLast(chatId, 'Нажми кнопку внизу: ▶️ Начать, ⏹ Закончить или 📊 Сегодня.');
 });
 
 console.log('Бот запущен...');
